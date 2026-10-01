@@ -179,7 +179,7 @@ export interface ConnectorConfig {
   collation?: string;
   /**
    * Session-setting statements re-run at the start of every read-only execution
-   * (MySQL, MariaDB). Validated by parseReadonlySessionSQL; see
+   * (PostgreSQL, MySQL, MariaDB). Validated by parseReadonlySessionSQL; see
    * src/utils/readonly-session-sql.ts for why they run per execution.
    */
   readonlySessionSql?: string;

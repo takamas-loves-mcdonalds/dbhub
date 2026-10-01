@@ -914,4 +914,86 @@ describe('PostgreSQL Connector Integration Tests', () => {
       }
     });
   });
+
+  describe('readonly_session_sql', () => {
+    // One pooled connection, so every call below reuses the same session and a
+    // value left over from an earlier call would be visible.
+    const connectWithSessionSql = async (connector: PostgresConnector) =>
+      connector.connect(postgresTest.connectionString, undefined, {
+        poolMaxConnections: 1,
+        readonlySessionSql: "SET LOCAL statement_timeout = '30s'; SET LOCAL lock_timeout = '5s';",
+      });
+
+    it('should apply the settings to read-only executions', async () => {
+      const connector = new PostgresConnector();
+      try {
+        await connectWithSessionSql(connector);
+
+        const result = await connector.executeSQL(
+          "SELECT current_setting('statement_timeout') AS st, current_setting('lock_timeout') AS lt",
+          { readonly: true }
+        );
+
+        expect(result.resultSets[0].rows[0]).toEqual({ st: '30s', lt: '5s' });
+      } finally {
+        await connector.disconnect();
+      }
+    });
+
+    it('should put a value back after a client rewrote it with set_config', async () => {
+      const connector = new PostgresConnector();
+      try {
+        await connectWithSessionSql(connector);
+
+        // set_config is callable from a plain SELECT, so it passes readonly mode;
+        // with is_local = false the change outlives the transaction.
+        await connector.executeSQL("SELECT set_config('statement_timeout', '0', false)", {
+          readonly: true,
+        });
+
+        const result = await connector.executeSQL(
+          "SELECT current_setting('statement_timeout') AS st",
+          { readonly: true }
+        );
+
+        expect(result.resultSets[0].rows[0].st).toBe('30s');
+      } finally {
+        await connector.disconnect();
+      }
+    });
+
+    it('should apply the settings to every statement of a multi-statement execution', async () => {
+      const connector = new PostgresConnector();
+      try {
+        await connectWithSessionSql(connector);
+
+        const result = await connector.executeSQL(
+          "SELECT 1 AS one; SELECT current_setting('lock_timeout') AS lt",
+          { readonly: true }
+        );
+
+        expect(result.resultSets[1].rows[0].lt).toBe('5s');
+      } finally {
+        await connector.disconnect();
+      }
+    });
+
+    it('should not affect writable executions on the same connection', async () => {
+      const connector = new PostgresConnector();
+      try {
+        await connectWithSessionSql(connector);
+
+        await connector.executeSQL('SELECT 1', { readonly: true });
+        // SET LOCAL reverted at COMMIT, and the writable path does not run readonly_session_sql.
+        const result = await connector.executeSQL(
+          "SELECT current_setting('lock_timeout') AS lt",
+          {}
+        );
+
+        expect(result.resultSets[0].rows[0].lt).toBe('0');
+      } finally {
+        await connector.disconnect();
+      }
+    });
+  });
 });

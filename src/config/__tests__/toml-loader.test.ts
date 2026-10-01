@@ -1449,6 +1449,18 @@ SET SESSION lock_wait_timeout = 5;
         expect(result?.sources[0].readonly_session_sql).toContain('SET SESSION lock_wait_timeout');
       });
 
+      it('should accept SET LOCAL statements for PostgreSQL', () => {
+        const tomlContent = `
+[[sources]]
+id = "test_db"
+dsn = "postgres://user:pass@localhost:5432/testdb"
+readonly_session_sql = "SET LOCAL lock_timeout = '5s'"
+`;
+        fs.writeFileSync(path.join(tempDir, 'dbhub.toml'), tomlContent);
+
+        expect(loadTomlConfig()?.sources[0].readonly_session_sql).toBe("SET LOCAL lock_timeout = '5s'");
+      });
+
       it('should reject a statement that is not a session setting', () => {
         const tomlContent = `
 [[sources]]
@@ -1465,12 +1477,12 @@ readonly_session_sql = "SET SESSION lock_wait_timeout = 5; DELETE FROM users"
         const tomlContent = `
 [[sources]]
 id = "test_db"
-dsn = "postgres://user:pass@localhost:5432/testdb"
-readonly_session_sql = "SET LOCAL lock_timeout = '5s'"
+dsn = "sqlserver://user:pass@localhost:1433/testdb"
+readonly_session_sql = "SET LOCK_TIMEOUT 5000"
 `;
         fs.writeFileSync(path.join(tempDir, 'dbhub.toml'), tomlContent);
 
-        expect(() => loadTomlConfig()).toThrow('not supported for postgres');
+        expect(() => loadTomlConfig()).toThrow('not supported for sqlserver');
       });
 
       it('should reject a non-string value', () => {

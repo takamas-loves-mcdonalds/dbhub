@@ -284,7 +284,7 @@ export class ConnectorManager {
     if (source.collation) {
       config.collation = source.collation;
     }
-    // Pass readonly_session_sql (MySQL, MariaDB)
+    // Pass readonly_session_sql (PostgreSQL, MySQL, MariaDB)
     if (source.readonly_session_sql) {
       config.readonlySessionSql = source.readonly_session_sql;
     }

@@ -4,11 +4,13 @@ import { splitSQLStatements, stripCommentsAndStrings } from "./sql-parser.js";
 /**
  * Per-source `readonly_session_sql`: session-setting statements re-run at the start of
  * every read-only execution, inside the read-only transaction the connector
- * already opens (START TRANSACTION READ ONLY).
+ * already opens (BEGIN READ ONLY / START TRANSACTION READ ONLY).
  *
- * The pooled connection may be shared with writable tools on the same source,
- * which can change session settings, so re-running these statements per
- * execution puts the configured values back before every read-only statement.
+ * Settings applied once at connect time can be changed mid-session (by a
+ * writable tool sharing the pooled connection, or on PostgreSQL even from a
+ * read-only `SELECT set_config(...)`), and the change sticks on the connection.
+ * Re-running these statements per execution puts the configured values back
+ * before every read-only statement.
  *
  * Only the dialect's session-setting form is accepted, so this field cannot
  * become a general SQL execution path. The check runs on comment- and
@@ -23,6 +25,9 @@ import { splitSQLStatements, stripCommentsAndStrings } from "./sql-parser.js";
  * server rejects a malformed value on the first execution.
  */
 const sessionStatementPatterns: Partial<Record<ConnectorType, RegExp>> = {
+  // SET LOCAL only: a plain SET would outlive the transaction and stay on the
+  // pooled connection.
+  postgres: /^SET\s+LOCAL\s+([a-z_][a-z0-9_.]*)\s*(?:=|\bTO\b)/i,
   // One assignment per statement: a comma list could mix in another scope
   // (`SET SESSION a = 1, GLOBAL b = 2`). Commas inside string values are
   // blanked by the stripper, so `sql_mode = 'A,B'` still passes.
@@ -32,6 +37,7 @@ const sessionStatementPatterns: Partial<Record<ConnectorType, RegExp>> = {
 
 /** Human-readable form of each pattern, for error messages. */
 const sessionStatementForms: Partial<Record<ConnectorType, string>> = {
+  postgres: "SET LOCAL name = value",
   mysql: "SET SESSION name = value",
   mariadb: "SET SESSION name = value",
 };
@@ -44,6 +50,7 @@ const sessionStatementForms: Partial<Record<ConnectorType, string>> = {
  * on the connection for whichever execution draws it next.
  */
 const transactionControlSettings: Partial<Record<ConnectorType, readonly string[]>> = {
+  postgres: ["transaction_read_only", "default_transaction_read_only"],
   mysql: ["transaction_read_only", "tx_read_only", "autocommit", "completion_type"],
   mariadb: ["transaction_read_only", "tx_read_only", "autocommit", "completion_type"],
 };

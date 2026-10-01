@@ -23,6 +23,7 @@ import { obfuscateDSNPassword } from "../../utils/dsn-obfuscate.js";
 import { SQLRowLimiter } from "../../utils/sql-row-limiter.js";
 import { quoteIdentifier } from "../../utils/identifier-quoter.js";
 import { splitSQLStatements } from "../../utils/sql-parser.js";
+import { parseReadonlySessionSQL } from "../../utils/readonly-session-sql.js";
 import { FailedToReadCertificate } from "./failed-to-read-certificate.js";
 import { postgresTypeParsers } from "./type-parsers.js";
 import { closeQuietly } from "../../utils/resource-cleanup.js";
@@ -258,6 +259,10 @@ export class PostgresConnector implements Connector {
   // Default schema for discovery methods (first entry from search_path, or "public")
   private defaultSchema: string = "public";
 
+  // Per-source readonly_session_sql (SET LOCAL statements), re-run inside every
+  // read-only transaction; see src/utils/readonly-session-sql.ts
+  private sessionStatements: string[] = [];
+
   getId(): string {
     return this.sourceId;
   }
@@ -269,6 +274,7 @@ export class PostgresConnector implements Connector {
   async connect(dsn: string, initScript?: string, config?: ConnectorConfig): Promise<void> {
     // Reset default schema in case this connector instance is re-used across connect() calls
     this.defaultSchema = "public";
+    this.sessionStatements = config?.readonlySessionSql ? parseReadonlySessionSQL(config.readonlySessionSql, "postgres") : [];
 
     try {
       const poolConfig = await this.dsnParser.parse(dsn, config);
@@ -786,6 +792,18 @@ export class PostgresConnector implements Connector {
   }
 
 
+  /**
+   * Run the source's readonly_session_sql inside the current read-only transaction.
+   * SET LOCAL reverts at COMMIT/ROLLBACK, so nothing leaks onto the pooled
+   * connection, and a value a client rewrote (e.g. via set_config) is put back
+   * before the next read-only statement.
+   */
+  private async applySessionStatements(client: pg.PoolClient): Promise<void> {
+    for (const statement of this.sessionStatements) {
+      await client.query(statement);
+    }
+  }
+
   async executeSQL(sql: string, options: ExecuteOptions, parameters?: any[]): Promise<SQLResult> {
     if (!this.pool) {
       throw new Error("Not connected to database");
@@ -810,6 +828,7 @@ export class PostgresConnector implements Connector {
         if (options.readonly) {
           await client.query('BEGIN READ ONLY');
           try {
+            await this.applySessionStatements(client);
             const result = parameters && parameters.length > 0
               ? await client.query(processedStatement, parameters)
               : await client.query(processedStatement);
@@ -865,6 +884,9 @@ export class PostgresConnector implements Connector {
         // keyword classifier missed (defense in depth, not a parser).
         await client.query(options.readonly ? 'BEGIN READ ONLY' : 'BEGIN');
         try {
+          if (options.readonly) {
+            await this.applySessionStatements(client);
+          }
           for (let statement of statements) {
             // Apply maxRows limit (with a truncation probe row) to SELECT queries if specified
             const { sql: processedStatement, probeApplied } = SQLRowLimiter.applyMaxRowsWithTruncationProbe(

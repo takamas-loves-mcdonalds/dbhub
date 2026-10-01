@@ -14,6 +14,17 @@ describe("parseReadonlySessionSQL", () => {
       ]);
     });
 
+    it("splits PostgreSQL SET LOCAL statements in order", () => {
+      const sql = `
+        SET LOCAL statement_timeout = '30s';
+        SET LOCAL lock_timeout TO '5s';
+      `;
+      expect(parseReadonlySessionSQL(sql, "postgres")).toEqual([
+        "SET LOCAL statement_timeout = '30s'",
+        "SET LOCAL lock_timeout TO '5s'",
+      ]);
+    });
+
     it("accepts a comma inside a string value", () => {
       expect(
         parseReadonlySessionSQL("SET SESSION sql_mode = 'STRICT_TRANS_TABLES,NO_ZERO_DATE'", "mysql")
@@ -39,6 +50,13 @@ describe("parseReadonlySessionSQL", () => {
       expect(() => parseReadonlySessionSQL(sql, "mysql")).toThrow("SET SESSION name = value");
     });
 
+    it.each([
+      ["a plain SET, which would outlive the transaction", "SET statement_timeout = '30s'"],
+      ["SET SESSION", "SET SESSION statement_timeout = '30s'"],
+    ])("rejects %s on PostgreSQL", (_label, sql) => {
+      expect(() => parseReadonlySessionSQL(sql, "postgres")).toThrow("SET LOCAL name = value");
+    });
+
     it("rejects a second statement after a valid one", () => {
       expect(() =>
         parseReadonlySessionSQL("SET SESSION lock_wait_timeout = 5; DROP TABLE users", "mysql")
@@ -46,6 +64,8 @@ describe("parseReadonlySessionSQL", () => {
     });
 
     it.each([
+      ["postgres", "SET LOCAL transaction_read_only = off"],
+      ["postgres", "SET LOCAL default_transaction_read_only = off"],
       ["mysql", "SET SESSION transaction_read_only = 0"],
       ["mariadb", "SET SESSION tx_read_only = 0"],
       ["mysql", "SET SESSION autocommit = 0"],
@@ -58,7 +78,7 @@ describe("parseReadonlySessionSQL", () => {
       expect(() => parseReadonlySessionSQL("  ;  ", "mysql")).toThrow("empty");
     });
 
-    it.each(["postgres", "sqlserver", "oracle", "sqlite"] as const)(
+    it.each(["sqlserver", "oracle", "sqlite"] as const)(
       "rejects the unsupported dialect %s",
       dialect => {
         expect(() => parseReadonlySessionSQL("SET SESSION lock_wait_timeout = 5", dialect)).toThrow(

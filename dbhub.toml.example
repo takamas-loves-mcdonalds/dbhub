@@ -21,6 +21,7 @@ id = "local_pg"
 description = "Local development database"
 dsn = "postgres://postgres:postgres@localhost:5432/myapp"
 # pool_max_connections = 5  # Optional: per-process, per-source pool limit (default: 10)
+# readonly_session_sql = "SET LOCAL lock_timeout = '5s'"  # Optional: re-run before every read-only execution
 
 # Local PostgreSQL - Individual parameters (use when password contains special characters like @, :, /)
 # [[sources]]
@@ -135,7 +136,7 @@ dsn = "postgres://postgres:postgres@localhost:5432/myapp"
 # charset = "utf8mb4"               # Connection character set (uses its default collation)
 # collation = "utf8mb4_0900_ai_ci"  # Connection collation
 
-# MySQL with guardrails re-applied before every read-only execution (MySQL/MariaDB only)
+# MySQL with guardrails re-applied before every read-only execution
 # [[sources]]
 # id = "local_mysql_guarded"
 # dsn = "mysql://root:mysql@localhost:3306/myapp"
